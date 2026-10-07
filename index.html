@@ -1,0 +1,959 @@
+Implementei as melhorias solicitadas no site da PL Cel:
+
+---
+
+O que foi adicionado e ajustado:
+
+1. Imagens de Fallback Dinâmicas no Catálogo:
+   - Cada imagem do catálogo possui um listener `onerror`. Se uma imagem oficial da Apple demorar ou falhar no carregamento, ela é substituída instantaneamente por uma ilustração vetorial SVG renderizada com os gradientes exatos da cor selecionada, Dynamic Island e contornos do modelo.
+   - A troca de cor continua funcionando em tempo real e o botão do WhatsApp permanece atualizando o link com o nome do modelo e acabamento escolhidos.
+
+2. Otimização de Performance (Mobile & Baixa Potência):
+   - Imagens mais leves: as dimensões solicitadas ao CDN foram reduzidas de `940x1112` para `480x570`, diminuindo o peso dos arquivos pela metade para carregamento rápido em redes 3G/4G.
+   - Renderizador 3D Three.js adaptativo:
+     - Limitação inteligente do `devicePixelRatio` em até `1.5` com modo `powerPreference: 'low-power'` para evitar aquecimento em celulares de entrada.
+     - Pausa automática com IntersectionObserver: o loop de renderização 3D é pausado quando o usuário rola a tela para o catálogo ou seções inferiores, liberando 100% da GPU do smartphone e economizando bateria.
+     - Manutenção do `touch-action: pan-y`, garantindo que arrastar na horizontal gire o aparelho e arrastar na vertical role a página com fluidez.
+
+3. Navegação por Teclado e Acessibilidade (A11y):
+   - Anéis de foco visíveis (`:focus-visible`) com contraste padrão Apple em todos os botões, links, seletores e abas.
+   - Filtros com padrão WAI-ARIA: estruturados com `role="tablist"` e `role="tab"`, com navegação pelas teclas `Seta Direita` e `Seta Esquerda`.
+   - Seletores de cor: estruturados com `role="radiogroup"` e `role="radio"`, operáveis por clique, `Enter`, `Espaço` ou setas do teclado.
+   - Menu mobile: atributos `aria-expanded` e `aria-controls` dinâmicos, com suporte ao fechamento direto pela tecla `Escape`.
+
+---
+
+Código Completo Atualizado (`index.html`)
+
+Basta copiar e colar no seu arquivo `index.html`:
+
+```html
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>PL Cel | Vitrine Oficial — Experiência iPhone</title>
+  <meta name="description" content="A melhor experiência de compra de iPhone em São Paulo. Lacrados e seminovos com fotos reais, modelos 3D interativos e atendimento VIP via WhatsApp.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <style>
+    :root {
+      --bg: #000000;
+      --card: #121217;
+      --card-border: rgba(255, 255, 255, 0.08);
+      --card-hover: rgba(255, 255, 255, 0.16);
+      --text-main: #f5f5f7;
+      --text-muted: #86868b;
+      --apple-blue: #2997ff;
+      --wa-green: #25d366;
+      --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Plus Jakarta Sans", sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
+    html { scroll-behavior: smooth; background: var(--bg); color: var(--text-main); font-family: var(--font-display); }
+    body { overflow-x: hidden; line-height: 1.47; padding-top: env(safe-area-inset-top, 0px); }
+
+    :focus-visible {
+      outline: 2px solid var(--apple-blue) !important;
+      outline-offset: 3px !important;
+    }
+
+    .glow-sphere { position: absolute; border-radius: 50%; filter: blur(120px); pointer-events: none; z-index: 0; }
+
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 999;
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 12px clamp(16px, 4vw, 50px);
+      padding-top: calc(12px + env(safe-area-inset-top, 0px));
+      backdrop-filter: saturate(180%) blur(20px);
+      -webkit-backdrop-filter: saturate(180%) blur(20px);
+      background: rgba(0, 0, 0, 0.82);
+      border-bottom: 1px solid var(--card-border);
+    }
+    .brand-container { display: flex; align-items: center; gap: 10px; text-decoration: none; color: #fff; }
+    .brand-badge {
+      width: 36px; height: 36px; background: linear-gradient(135deg, #1c1c1e, #0a0a0d);
+      border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 10px; display: grid; place-items: center;
+    }
+    .brand-badge svg { width: 20px; height: 20px; fill: #fff; }
+    .brand-title { font-weight: 700; font-size: 18px; letter-spacing: -0.02em; }
+    .brand-title span { color: var(--apple-blue); }
+
+    .nav-links { display: flex; align-items: center; gap: 24px; }
+    .nav-links a { color: var(--text-muted); text-decoration: none; font-size: 13px; font-weight: 500; transition: color 0.2s; border-radius: 6px; padding: 4px 6px; }
+    .nav-links a:hover { color: #fff; }
+
+    .nav-actions { display: flex; align-items: center; gap: 10px; }
+    .ig-pill {
+      display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.12);
+      color: #f5f5f7; text-decoration: none; font-size: 13px; font-weight: 600; touch-action: manipulation;
+    }
+    .ig-pill:hover { background: linear-gradient(45deg, #f09433, #dc2743, #bc1888); border-color: transparent; }
+
+    .btn-apple {
+      display: inline-flex; align-items: center; gap: 8px; background: var(--apple-blue); color: #fff;
+      font-weight: 600; padding: 10px 20px; border-radius: 999px; font-size: 14px; text-decoration: none;
+      transition: transform 0.15s, background 0.2s; box-shadow: 0 4px 18px rgba(41, 151, 255, 0.35);
+      cursor: pointer; border: none; touch-action: manipulation; min-height: 44px;
+    }
+    .btn-apple:active { transform: scale(0.97); }
+    .btn-wa { background: var(--wa-green); color: #032511; box-shadow: 0 4px 18px rgba(37, 211, 102, 0.35); }
+    .btn-wa:hover { background: #1eb954; }
+
+    .hamburger {
+      display: none; background: none; border: 1px solid var(--card-border); border-radius: 10px;
+      width: 44px; height: 44px; cursor: pointer; padding: 10px; touch-action: manipulation;
+    }
+    .hamburger span { display: block; width: 100%; height: 2px; background: #fff; margin: 4px 0; border-radius: 2px; }
+
+    .mobile-menu {
+      display: none; position: fixed; top: calc(60px + env(safe-area-inset-top, 0px)); left: 0; right: 0; z-index: 998;
+      background: rgba(0, 0, 0, 0.95); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--card-border); padding: 16px 24px calc(20px + env(safe-area-inset-bottom, 0px));
+      flex-direction: column; gap: 6px;
+    }
+    .mobile-menu.open { display: flex; }
+    .mobile-menu a {
+      color: #f5f5f7; text-decoration: none; font-size: 16px; font-weight: 600; padding: 14px 8px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06); touch-action: manipulation; border-radius: 8px;
+    }
+    .mobile-menu a:last-child { border-bottom: none; }
+
+    .hero {
+      position: relative; min-height: 92vh; display: flex; align-items: center;
+      padding: 110px clamp(16px, 5vw, 60px) 40px; z-index: 1; overflow: hidden;
+    }
+    .hero-grid { display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 30px; width: 100%; max-width: 1400px; margin: 0 auto; }
+    .hero-eyebrow {
+      display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.15em; color: var(--apple-blue);
+      background: rgba(41, 151, 255, 0.1); border: 1px solid rgba(41, 151, 255, 0.25);
+      padding: 6px 14px; border-radius: 999px; margin-bottom: 18px;
+    }
+    .hero h1 { font-size: clamp(34px, 5vw, 76px); font-weight: 800; letter-spacing: -0.04em; line-height: 1.05; margin-bottom: 18px; }
+    .gradient-text { background: linear-gradient(135deg, #ffffff 40%, rgba(255, 255, 255, 0.5)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .hero-sub { font-size: clamp(16px, 1.6vw, 20px); color: var(--text-muted); max-width: 520px; line-height: 1.45; margin-bottom: 28px; }
+    .hero-cta-group { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+    .btn-ghost { display: inline-flex; align-items: center; gap: 6px; color: var(--apple-blue); font-size: 15px; font-weight: 600; text-decoration: none; padding: 10px; border-radius: 8px; }
+
+    .stage-container {
+      position: relative; width: 100%; height: min(560px, 68vh);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+    }
+    #threejs-canvas { width: 100%; height: 100%; cursor: grab; touch-action: pan-y; }
+    #threejs-canvas:active { cursor: grabbing; }
+
+    .stage-controls {
+      position: absolute; bottom: 8px; display: flex; flex-direction: column; align-items: center; gap: 8px;
+      background: rgba(18, 18, 23, 0.85); backdrop-filter: blur(20px); padding: 8px 18px; border-radius: 999px;
+      border: 1px solid var(--card-border); box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+    .stage-tip { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; text-align: center; }
+    .color-swatches { display: flex; gap: 12px; }
+    .color-dot {
+      width: 32px; height: 32px; border-radius: 50%; cursor: pointer; border: 2px solid transparent;
+      transition: all 0.2s; touch-action: manipulation; background: transparent; padding: 0;
+    }
+    .color-dot.active { transform: scale(1.18); border-color: #fff; box-shadow: 0 0 12px rgba(255,255,255,0.4); }
+
+    .proof-strip {
+      border-block: 1px solid var(--card-border); background: rgba(255, 255, 255, 0.02);
+      padding: 24px clamp(16px, 4vw, 50px); display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 20px; max-width: 1400px; margin: 0 auto;
+    }
+    .proof-item { display: flex; align-items: center; gap: 12px; }
+    .proof-icon { width: 42px; height: 42px; border-radius: 12px; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--card-border); display: grid; place-items: center; font-size: 18px; flex-shrink: 0; }
+    .proof-title { font-weight: 700; font-size: 14px; color: #fff; }
+    .proof-desc { font-size: 12px; color: var(--text-muted); }
+
+    .section-wrap { padding: 80px clamp(16px, 4vw, 50px); max-width: 1400px; margin: 0 auto; }
+    .section-header { margin-bottom: 36px; }
+    .section-eyebrow { font-size: 13px; font-weight: 700; color: var(--apple-blue); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px; }
+    .section-title { font-size: clamp(28px, 4vw, 52px); font-weight: 800; letter-spacing: -0.03em; }
+
+    .filter-tabs {
+      display: flex; gap: 10px; overflow-x: auto; padding-bottom: 12px; margin-bottom: 30px;
+      scrollbar-width: none; -webkit-overflow-scrolling: touch;
+    }
+    .filter-tabs::-webkit-scrollbar { display: none; }
+    .tab-btn {
+      background: var(--card); border: 1px solid var(--card-border); color: var(--text-muted);
+      padding: 10px 22px; border-radius: 999px; font-size: 14px; font-weight: 600; cursor: pointer;
+      white-space: nowrap; transition: all 0.2s; touch-action: manipulation; min-height: 44px;
+    }
+    .tab-btn.active { background: #fff; color: #000; border-color: #fff; }
+
+    .device-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 24px; }
+    .device-card {
+      background: var(--card); border: 1px solid var(--card-border); border-radius: 28px; padding: 24px;
+      display: flex; flex-direction: column; position: relative; transition: all 0.3s; overflow: hidden;
+    }
+    @media (hover: hover) {
+      .device-card:hover { transform: translateY(-6px); border-color: var(--card-hover); box-shadow: 0 25px 50px rgba(0, 0, 0, 0.6); }
+    }
+    .card-badge {
+      position: absolute; top: 18px; right: 18px; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.12);
+      padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--apple-blue);
+    }
+    .card-visual {
+      height: 250px; display: flex; align-items: center; justify-content: center; margin-bottom: 20px;
+      position: relative;
+    }
+    .real-iphone-img {
+      max-height: 230px; max-width: 90%; object-fit: contain; filter: drop-shadow(0 20px 25px rgba(0,0,0,0.7));
+      transition: transform 0.3s ease, opacity 0.25s ease;
+    }
+    .iphone-fallback-svg {
+      max-height: 230px; width: auto; filter: drop-shadow(0 20px 25px rgba(0,0,0,0.7));
+      transition: transform 0.3s ease;
+    }
+
+    .card-title { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+    .card-desc { font-size: 13px; color: var(--text-muted); line-height: 1.45; margin-bottom: 16px; min-height: 38px; }
+    .card-specs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 18px; }
+    .spec-tag { background: rgba(255, 255, 255, 0.05); border: 1px solid var(--card-border); padding: 4px 10px; border-radius: 8px; font-size: 12px; color: #ddd; }
+    .card-colors { display: flex; gap: 10px; margin-bottom: 22px; }
+    .card-color-dot {
+      width: 28px; height: 28px; border-radius: 50%; cursor: pointer; border: 2px solid transparent;
+      transition: all 0.2s; touch-action: manipulation; background: transparent; padding: 0;
+    }
+    .card-color-dot.active { transform: scale(1.18); border-color: #fff; box-shadow: 0 0 10px rgba(255,255,255,0.4); }
+    .card-footer { margin-top: auto; display: flex; flex-direction: column; gap: 10px; }
+
+    .bento-grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 18px; }
+    .bento-card { background: var(--card); border: 1px solid var(--card-border); border-radius: 26px; padding: clamp(20px, 3.5vw, 36px); display: flex; flex-direction: column; justify-content: space-between; }
+    .bento-col-8 { grid-column: span 8; }
+    .bento-col-4 { grid-column: span 4; }
+    .bento-col-6 { grid-column: span 6; }
+    .bento-icon { font-size: 30px; margin-bottom: 14px; }
+    .bento-title { font-size: 24px; font-weight: 700; margin-bottom: 10px; }
+    .bento-text { color: var(--text-muted); font-size: 14px; line-height: 1.5; }
+
+    .tradein-box {
+      background: linear-gradient(135deg, #14141c, #0a0a0f); border: 1px solid var(--card-border); border-radius: 28px;
+      padding: clamp(24px, 4vw, 44px); display: grid; grid-template-columns: 1fr 1fr; gap: 32px; align-items: center;
+    }
+    .tradein-select { width: 100%; background: #1c1c24; border: 1px solid var(--card-border); color: #fff; padding: 14px 18px; border-radius: 14px; font-size: 15px; outline: none; margin: 8px 0 20px; }
+
+    footer { border-top: 1px solid var(--card-border); padding: 50px clamp(16px, 4vw, 50px) calc(40px + env(safe-area-inset-bottom, 0px)); background: #000; font-size: 13px; color: var(--text-muted); }
+    .footer-content { max-width: 1400px; margin: 0 auto; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 24px; margin-bottom: 30px; }
+
+    .fab-wa {
+      position: fixed; right: 20px; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); z-index: 999;
+      background: var(--wa-green); width: 60px; height: 60px; border-radius: 50%; display: grid; place-items: center;
+      box-shadow: 0 10px 30px rgba(37, 211, 102, 0.45); text-decoration: none; transition: transform 0.2s;
+      touch-action: manipulation;
+    }
+    .fab-wa:active { transform: scale(0.92); }
+    .fab-wa svg { width: 32px; height: 32px; fill: #032511; }
+    .fab-ping { position: absolute; inset: -4px; border-radius: 50%; border: 2px solid var(--wa-green); animation: ping 2s infinite; }
+    @keyframes ping { 75%, 100% { transform: scale(1.4); opacity: 0; } }
+
+    @media (max-width: 900px) {
+      .hero-grid { grid-template-columns: 1fr; text-align: center; gap: 10px; }
+      .hero-sub { margin-inline: auto; }
+      .hero-cta-group { justify-content: center; }
+      .bento-col-8, .bento-col-4, .bento-col-6 { grid-column: span 12; }
+      .tradein-box { grid-template-columns: 1fr; }
+      .nav-links { display: none; }
+      .hamburger { display: block; }
+      .ig-pill span { display: none; }
+      .stage-container { height: 440px; }
+    }
+
+    @media (max-width: 600px) {
+      .hero { padding: 95px 16px 30px; }
+      .hero h1 { font-size: clamp(32px, 8.5vw, 42px); }
+      .hero-cta-group .btn-apple { width: 100%; justify-content: center; min-height: 50px; }
+      .device-grid { grid-template-columns: 1fr; gap: 18px; }
+      .card-footer .btn-apple { min-height: 50px; justify-content: center; }
+      .section-wrap { padding: 60px 16px; }
+      .fab-wa { right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); width: 56px; height: 56px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Navigation -->
+  <nav id="navbar" aria-label="Navegação principal">
+    <a href="#" class="brand-container" aria-label="PL Cel - Início">
+      <div class="brand-badge" aria-hidden="true">
+        <svg viewBox="0 0 170 170"><path d="M150.37 130.25c-2.45 5.66-5.35 10.87-8.71 15.66-4.58 6.53-8.33 11.05-11.22 13.56-4.48 4.12-9.28 6.23-14.42 6.35-3.69 0-8.14-1.05-13.32-3.18-5.19-2.12-9.97-3.17-14.34-3.17-4.58 0-9.49 1.05-14.75 3.17-5.26 2.13-9.5 3.24-12.74 3.35-4.35.13-9.16-1.9-14.42-6.08-3.69-3.04-7.67-7.81-11.96-14.34-6.85-10.43-12.08-22.38-15.69-35.85-3.61-13.47-5.42-26.18-5.42-38.12 0-14.12 3.52-25.79 10.57-35.01 7.05-9.22 16.03-13.9 26.94-14.04 4.58 0 9.77 1.25 15.57 3.75 5.8 2.5 9.77 3.86 11.91 4.09 1.83-.23 5.92-1.65 12.28-4.25 6.35-2.6 11.66-3.8 15.92-3.61 12.06.63 21.64 5.3 28.73 14.02-10.43 6.35-15.54 15.08-15.34 26.18.23 8.7 3.57 15.93 10.02 21.7 6.45 5.76 14.06 9.07 22.84 9.93-2.13 6.52-4.63 13.12-7.5 19.81zm-32.32-114.7c0 5.42-1.9 10.74-5.69 15.97-3.8 5.23-8.6 9.07-14.4 11.53-.35-1.42-.53-2.73-.53-3.92 0-5.21 2.05-10.51 6.16-15.9 4.1-5.39 9.06-9.17 14.88-11.35.24 1.19.36 2.37.36 3.67z"/></svg>
+      </div>
+      <div class="brand-title">PL Cel<span>.</span></div>
+    </a>
+
+    <div class="nav-links">
+      <a href="#hero">Visão Geral</a>
+      <a href="#catalogo">Modelos</a>
+      <a href="#diferenciais">Garantias</a>
+      <a href="#troca">Troca com Troco</a>
+    </div>
+
+    <div class="nav-actions">
+      <a href="https://www.instagram.com/pl.c3l/" target="_blank" rel="noopener" class="ig-pill" aria-label="Acessar o perfil no Instagram @pl.c3l">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/></svg>
+        <span>@pl.c3l</span>
+      </a>
+      <a href="https://wa.me/5511976328585?text=Ol%C3%A1!%20Vim%20pelo%20site%20da%20PL%20Cel." target="_blank" rel="noopener" class="btn-apple btn-wa" aria-label="Falar conosco no WhatsApp">
+        WhatsApp
+      </a>
+      <button class="hamburger" id="hamburger" aria-label="Abrir menu de navegação" aria-expanded="false" aria-controls="mobile-menu">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- Mobile Drawer -->
+  <div class="mobile-menu" id="mobile-menu" role="dialog" aria-label="Menu móvel">
+    <a href="#hero">Visão Geral</a>
+    <a href="#catalogo">Catálogo de iPhones</a>
+    <a href="#diferenciais">Garantias e Benefícios</a>
+    <a href="#troca">Troca com Troco</a>
+    <a href="https://www.instagram.com/pl.c3l/" target="_blank" rel="noopener">Instagram Oficial (@pl.c3l)</a>
+  </div>
+
+  <!-- Hero com Tridimensionalidade Interativa -->
+  <section class="hero" id="hero" aria-labelledby="hero-title">
+    <div class="glow-sphere" style="width: 500px; height: 500px; top: -100px; right: -100px; background: rgba(41, 151, 255, 0.2);" aria-hidden="true"></div>
+    <div class="hero-grid">
+      <div class="hero-copy">
+        <div class="hero-eyebrow">
+          <span>Coleção 2026</span> • <span>Pronta Entrega SP</span>
+        </div>
+        <h1 id="hero-title">iPhone 17 Pro.<br><span class="gradient-text">Titânio. Poder. Perfeição.</span></h1>
+        <p class="hero-sub">
+          Aparelhos lacrados com garantia mundial Apple e seminovos selecionados com bateria 100%. Atendimento com entrega expressa via motoboy em toda SP.
+        </p>
+        <div class="hero-cta-group">
+          <a href="https://wa.me/5511976328585?text=Ol%C3%A1!%20Gostaria%20de%20consultar%20o%20pre%C3%A7o%20do%20iPhone%2017%20Pro." target="_blank" rel="noopener" class="btn-apple btn-wa">
+            💬 Comprar pelo WhatsApp
+          </a>
+          <a href="#catalogo" class="btn-ghost">
+            Explorar catálogo <span aria-hidden="true">➔</span>
+          </a>
+        </div>
+      </div>
+
+      <div class="stage-container" aria-label="Vitrine 3D interativa do iPhone">
+        <canvas id="threejs-canvas" role="img" aria-label="Modelo 3D do iPhone rotacionável por toque ou mouse"></canvas>
+        <div class="stage-controls">
+          <div class="stage-tip" id="stage-tip-desc">Arraste para girar em 3D • Escolha o acabamento</div>
+          <div class="color-swatches" id="hero-swatches" role="radiogroup" aria-labelledby="stage-tip-desc">
+            <button class="color-dot active" role="radio" aria-checked="true" data-color="#d4af37" style="background: linear-gradient(135deg, #e8c87c, #9d7b2a);" title="Dourado Cósmico" aria-label="Cor Dourado Cósmico"></button>
+            <button class="color-dot" role="radio" aria-checked="false" data-color="#3c434d" style="background: linear-gradient(135deg, #4f5865, #242830);" title="Titânio Natural" aria-label="Cor Titânio Natural"></button>
+            <button class="color-dot" role="radio" aria-checked="false" data-color="#1f2022" style="background: linear-gradient(135deg, #303135, #111214);" title="Preto Espacial" aria-label="Cor Preto Espacial"></button>
+            <button class="color-dot" role="radio" aria-checked="false" data-color="#2a3f5f" style="background: linear-gradient(135deg, #3c5987, #1b283d);" title="Azul Titânio" aria-label="Cor Azul Titânio"></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Barra de Confiança -->
+  <div class="proof-strip" aria-label="Destaques de confiança">
+    <div class="proof-item">
+      <div class="proof-icon" aria-hidden="true">🛡️</div>
+      <div>
+        <div class="proof-title">Garantia Comprovada</div>
+        <div class="proof-desc">1 ano em lacrados e suporte direto PL Cel</div>
+      </div>
+    </div>
+    <div class="proof-item">
+      <div class="proof-icon" aria-hidden="true">⚡</div>
+      <div>
+        <div class="proof-title">Entrega Expressa SP</div>
+        <div class="proof-desc">Receba via motoboy no mesmo dia</div>
+      </div>
+    </div>
+    <div class="proof-item">
+      <div class="proof-icon" aria-hidden="true">🔄</div>
+      <div>
+        <div class="proof-title">Troca com Troco</div>
+        <div class="proof-desc">Seu iPhone usado vale como entrada</div>
+      </div>
+    </div>
+    <div class="proof-item">
+      <div class="proof-icon" aria-hidden="true">💳</div>
+      <div>
+        <div class="proof-title">Até 18x no Cartão</div>
+        <div class="proof-desc">Melhores taxas e desconto no Pix</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Catálogo -->
+  <section class="section-wrap" id="catalogo" aria-labelledby="catalogo-title">
+    <div class="section-header">
+      <div class="section-eyebrow">Vitrine Oficial</div>
+      <h2 class="section-title" id="catalogo-title">Escolha seu modelo e cor.</h2>
+    </div>
+
+    <!-- Filtros Acessíveis -->
+    <div class="filter-tabs" id="filter-tabs" role="tablist" aria-label="Filtrar iPhones por geração">
+      <button class="tab-btn active" role="tab" aria-selected="true" data-filter="all" id="tab-all">Todos os Modelos</button>
+      <button class="tab-btn" role="tab" aria-selected="false" data-filter="17" id="tab-17">Geração 17</button>
+      <button class="tab-btn" role="tab" aria-selected="false" data-filter="16" id="tab-16">Geração 16</button>
+      <button class="tab-btn" role="tab" aria-selected="false" data-filter="15" id="tab-15">Geração 15</button>
+      <button class="tab-btn" role="tab" aria-selected="false" data-filter="14" id="tab-14">Geração 14 e 13</button>
+    </div>
+
+    <!-- Grid de Aparelhos -->
+    <div class="device-grid" id="device-grid" role="region" aria-live="polite" aria-label="Lista de iPhones"></div>
+  </section>
+
+  <!-- Diferenciais / Bento Grid -->
+  <section class="section-wrap" id="diferenciais" aria-labelledby="diferenciais-title">
+    <div class="section-header">
+      <div class="section-eyebrow">Por que comprar com a gente</div>
+      <h2 class="section-title" id="diferenciais-title">Transparência total na sua compra.</h2>
+    </div>
+
+    <div class="bento-grid">
+      <div class="bento-card bento-col-8" style="background: linear-gradient(135deg, #161821, #0f1016);">
+        <div>
+          <div class="bento-icon" aria-hidden="true">✨</div>
+          <div class="bento-title">Aparelhos 100% Originais e Inspecionados</div>
+          <div class="bento-text">
+            Checklist completo com mais de 30 pontos: tela original com True Tone, câmeras sem manchas, biometria (Face ID) funcionando perfeitamente e bateria com integridade comprovada.
+          </div>
+        </div>
+      </div>
+
+      <div class="bento-card bento-col-4" style="background: linear-gradient(135deg, #1b1724, #0f0c16);">
+        <div>
+          <div class="bento-icon" aria-hidden="true">📸</div>
+          <div class="bento-title">Instagram Ativo</div>
+          <div class="bento-text">
+            Confira entregas diárias, unboxings e avaliações de clientes em <b>@pl.c3l</b>.
+          </div>
+        </div>
+        <a href="https://www.instagram.com/pl.c3l/" target="_blank" rel="noopener" class="btn-apple" style="margin-top: 20px; justify-content: center;">
+          Acessar @pl.c3l
+        </a>
+      </div>
+
+      <div class="bento-card bento-col-6">
+        <div>
+          <div class="bento-icon" aria-hidden="true">🏍️</div>
+          <div class="bento-title">Entrega Segura com Teste no Local</div>
+          <div class="bento-text">
+            Nosso motoboy próprio entrega em mãos em SP e Grande ABC. Você liga o aparelho, testa tudo com calma e só depois realiza o pagamento.
+          </div>
+        </div>
+      </div>
+
+      <div class="bento-card bento-col-6">
+        <div>
+          <div class="bento-icon" aria-hidden="true">💎</div>
+          <div class="bento-title">Kit Acessórios Premium</div>
+          <div class="bento-text">
+            Fonte USB-C de 20W rápida, cabo reforçado, capas MagSafe e película instalada sem bolhas no ato da entrega.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Simulador de Troca -->
+  <section class="section-wrap" id="troca" aria-labelledby="troca-title">
+    <div class="tradein-box">
+      <div>
+        <div class="section-eyebrow">Troca com Troco</div>
+        <h2 id="troca-title" style="font-size: clamp(26px, 3.5vw, 42px); font-weight: 800; margin-bottom: 14px;">
+          Seu iPhone antigo vale como entrada.
+        </h2>
+        <p style="color: var(--text-muted); font-size: 15px; margin-bottom: 20px;">
+          Avaliamos seu modelo atual de forma rápida e justa pelo WhatsApp.
+        </p>
+      </div>
+
+      <div style="background: rgba(0,0,0,0.5); padding: 24px; border-radius: 20px; border: 1px solid var(--card-border);">
+        <label for="tradein-phone" style="font-size: 13px; font-weight: 600; color: var(--text-muted); display: block;">Qual modelo você tem hoje?</label>
+        <select class="tradein-select" id="tradein-phone">
+          <option>iPhone 15 Pro Max</option>
+          <option>iPhone 15 Pro</option>
+          <option>iPhone 15</option>
+          <option>iPhone 14 Pro Max</option>
+          <option>iPhone 14 Pro</option>
+          <option>iPhone 14</option>
+          <option>iPhone 13 Pro Max</option>
+          <option>iPhone 13</option>
+          <option>iPhone 12 / 11</option>
+        </select>
+
+        <label for="tradein-condition" style="font-size: 13px; font-weight: 600; color: var(--text-muted); display: block;">Estado do aparelho</label>
+        <select class="tradein-select" id="tradein-condition">
+          <option>Impecável (sem marcas, bateria > 85%)</option>
+          <option>Marcas leves de uso</option>
+          <option>Apenas o aparelho (sem caixa)</option>
+        </select>
+
+        <button onclick="enviarSimulacao()" class="btn-apple" style="width: 100%; justify-content: center; padding: 14px; font-size: 15px;">
+          Enviar para avaliação imediata <span aria-hidden="true">➔</span>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Rodapé -->
+  <footer>
+    <div class="footer-content">
+      <div style="display: flex; flex-direction: column; gap: 10px; max-width: 320px;">
+        <div class="brand-title" style="font-size: 22px;">PL Cel<span>.</span></div>
+        <p>Especialistas em ecossistema Apple. Aparelhos lacrados e seminovos com garantia real e procedência.</p>
+        <div style="color: #666; font-size: 12px; margin-top: 6px;">São Paulo - SP • Atendimento em toda região</div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <h5 style="color: #fff; font-size: 14px;">Atendimento Direto</h5>
+        <a href="https://wa.me/5511976328585" target="_blank" rel="noopener" style="color: var(--text-muted); text-decoration: none;">WhatsApp: (11) 97632-8585</a>
+        <a href="https://www.instagram.com/pl.c3l/" target="_blank" rel="noopener" style="color: var(--text-muted); text-decoration: none;">Instagram: @pl.c3l</a>
+      </div>
+    </div>
+    <div style="max-width: 1400px; margin: 0 auto; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.06); display: flex; justify-content: space-between; font-size: 12px; color: #555;">
+      <div>© 2026 PL Cel. Todos os direitos reservados.</div>
+      <div>Experiência Apple Store</div>
+    </div>
+  </footer>
+
+  <!-- WhatsApp FAB -->
+  <a href="https://wa.me/5511976328585?text=Ol%C3%A1!%20Vim%20pelo%20site%20da%20PL%20Cel." target="_blank" rel="noopener" class="fab-wa" aria-label="Abrir conversa no WhatsApp da PL Cel">
+    <div class="fab-ping" aria-hidden="true"></div>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.711 2.599 2.679-.702c.972.533 1.839.816 2.781.816 3.18 0 5.767-2.587 5.767-5.766.001-3.18-2.585-5.766-5.767-5.766zm9.969 5.766c0 5.503-4.477 9.98-9.98 9.98-1.748 0-3.38-.456-4.808-1.252l-5.212 1.368 1.393-5.086c-.899-1.488-1.413-3.235-1.413-5.01 0-5.503 4.477-9.98 9.98-9.98 5.503 0 10.04 4.477 10.04 9.98z"/></svg>
+  </a>
+
+  <!-- Script Three.js 3D Adaptativo + Catálogo com Fallback SVG e A11y -->
+  <script>
+    // Menu mobile acessível
+    const hamburger = document.getElementById('hamburger');
+    const mobileMenu = document.getElementById('mobile-menu');
+
+    function toggleMenu(open) {
+      const isOpen = open !== undefined ? open : !mobileMenu.classList.contains('open');
+      mobileMenu.classList.toggle('open', isOpen);
+      hamburger.setAttribute('aria-expanded', isOpen);
+      hamburger.setAttribute('aria-label', isOpen ? 'Fechar menu de navegação' : 'Abrir menu de navegação');
+    }
+
+    hamburger.addEventListener('click', () => toggleMenu());
+    mobileMenu.querySelectorAll('a').forEach(link => {
+      link.addEventListener('click', () => toggleMenu(false));
+    });
+
+    window.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && mobileMenu.classList.contains('open')) {
+        toggleMenu(false);
+        hamburger.focus();
+      }
+    });
+
+    // Three.js 3D adaptativo
+    const canvas = document.getElementById('threejs-canvas');
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: dpr > 1, alpha: true, powerPreference: 'low-power' });
+    renderer.setPixelRatio(dpr);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.15;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 50);
+    camera.position.set(0, 0, 7.5);
+
+    function resizeCanvas() {
+      const container = canvas.parentElement;
+      const w = container.clientWidth || window.innerWidth;
+      const h = container.clientHeight || 460;
+      renderer.setSize(w, h, false);
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+    }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+    window.addEventListener('orientationchange', () => setTimeout(resizeCanvas, 200));
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+    const keyLight = new THREE.DirectionalLight(0xffffff, 2.5);
+    keyLight.position.set(5, 5, 4);
+    scene.add(keyLight);
+    const rimLight = new THREE.DirectionalLight(0x2997ff, 2.0);
+    rimLight.position.set(-5, -2, -3);
+    scene.add(rimLight);
+
+    const phoneGroup = new THREE.Group();
+    scene.add(phoneGroup);
+
+    const width = 2.4, height = 4.9, depth = 0.26, radius = 0.38;
+    function createRoundedRect(w, h, r) {
+      const s = new THREE.Shape();
+      const x = -w/2, y = -h/2;
+      s.moveTo(x + r, y);
+      s.lineTo(x + w - r, y);
+      s.quadraticCurveTo(x + w, y, x + w, y + r);
+      s.lineTo(x + w, y + h - r);
+      s.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      s.lineTo(x + r, y + h);
+      s.quadraticCurveTo(x, y + h, x, y + h - r);
+      s.lineTo(x, y + r);
+      s.quadraticCurveTo(x, y, x + r, y);
+      return s;
+    }
+
+    const geometry = new THREE.ExtrudeGeometry(createRoundedRect(width, height, radius), {
+      depth: depth, bevelEnabled: true, bevelSegments: 4, steps: 1, bevelSize: 0.04, bevelThickness: 0.04
+    });
+    geometry.center();
+
+    const titaniumMaterial = new THREE.MeshPhysicalMaterial({
+      color: 0xd4af37, metalness: 0.92, roughness: 0.22, clearcoat: 0.4, clearcoatRoughness: 0.15
+    });
+    phoneGroup.add(new THREE.Mesh(geometry, titaniumMaterial));
+
+    // Tela Frontal
+    const screen = new THREE.Mesh(
+      new THREE.PlaneGeometry(width * 0.94, height * 0.94),
+      new THREE.MeshBasicMaterial({ color: 0x050508 })
+    );
+    screen.position.z = depth / 2 + 0.045;
+    phoneGroup.add(screen);
+
+    // Dynamic Island
+    const island = new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.12), new THREE.MeshBasicMaterial({ color: 0x000000 }));
+    island.position.set(0, height * 0.41, depth / 2 + 0.047);
+    phoneGroup.add(island);
+
+    // Bump Traseiro
+    const cameraBump = new THREE.Mesh(
+      new THREE.BoxGeometry(1.05, 1.05, 0.12),
+      new THREE.MeshPhysicalMaterial({ color: 0x222228, metalness: 0.8, roughness: 0.3 })
+    );
+    cameraBump.position.set(-width * 0.22, height * 0.32, -depth / 2 - 0.06);
+    phoneGroup.add(cameraBump);
+
+    // Lentes Pro
+    [[-width * 0.34, height * 0.39], [-width * 0.34, height * 0.25], [-width * 0.13, height * 0.32]].forEach(pos => {
+      const ring = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.18, 0.18, 0.14, 20),
+        new THREE.MeshStandardMaterial({ color: 0x111114, metalness: 0.95, roughness: 0.1 })
+      );
+      ring.rotation.x = Math.PI / 2;
+      ring.position.set(pos[0], pos[1], -depth / 2 - 0.12);
+      phoneGroup.add(ring);
+    });
+
+    let isDragging = false, prevX = 0, prevY = 0, rotY = -0.35, rotX = 0.08, autoRotate = true;
+    let isVisibleOnScreen = true;
+
+    if ('IntersectionObserver' in window) {
+      const observer = new IntersectionObserver(entries => {
+        entries.forEach(entry => { isVisibleOnScreen = entry.isIntersecting; });
+      }, { threshold: 0.05 });
+      observer.observe(canvas);
+    }
+
+    canvas.addEventListener('pointerdown', e => {
+      isDragging = true; autoRotate = false; prevX = e.clientX; prevY = e.clientY;
+    });
+
+    const stopDragging = () => {
+      isDragging = false;
+      setTimeout(() => { autoRotate = true; }, 3000);
+    };
+    window.addEventListener('pointerup', stopDragging);
+    window.addEventListener('pointercancel', stopDragging);
+
+    window.addEventListener('pointermove', e => {
+      if (!isDragging) return;
+      const dx = e.clientX - prevX;
+      const dy = e.clientY - prevY;
+      rotY += dx * 0.01;
+      rotX = Math.max(-0.6, Math.min(0.6, rotX + dy * 0.01));
+      prevX = e.clientX; prevY = e.clientY;
+    });
+
+    function animate() {
+      requestAnimationFrame(animate);
+      if (!isVisibleOnScreen) return;
+      if (autoRotate) rotY += 0.006;
+      phoneGroup.rotation.y += (rotY - phoneGroup.rotation.y) * 0.08;
+      phoneGroup.rotation.x += (rotX - phoneGroup.rotation.x) * 0.08;
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    const heroSwatches = document.querySelectorAll('#hero-swatches .color-dot');
+    heroSwatches.forEach((dot, index) => {
+      const selectDot = () => {
+        heroSwatches.forEach(d => {
+          d.classList.remove('active');
+          d.setAttribute('aria-checked', 'false');
+        });
+        dot.classList.add('active');
+        dot.setAttribute('aria-checked', 'true');
+        titaniumMaterial.color.set(dot.dataset.color);
+      };
+
+      dot.addEventListener('click', selectDot);
+      dot.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          selectDot();
+        } else if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          const next = heroSwatches[(index + 1) % heroSwatches.length];
+          next.focus(); next.click();
+        } else if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          const prev = heroSwatches[(index - 1 + heroSwatches.length) % heroSwatches.length];
+          prev.focus(); prev.click();
+        }
+      });
+    });
+
+    // Fallback SVG dinâmico
+    function generateFallbackSvg(c1, c2, name) {
+      return `
+        <svg class="iphone-fallback-svg" viewBox="0 0 160 310" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${name} ilustração renderizada">
+          <defs>
+            <linearGradient id="bodyGrad-${c1.replace('#','')}" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="${c1}" />
+              <stop offset="100%" stop-color="${c2}" />
+            </linearGradient>
+            <linearGradient id="edgeGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stop-color="rgba(255,255,255,0.4)" />
+              <stop offset="100%" stop-color="rgba(0,0,0,0.6)" />
+            </linearGradient>
+          </defs>
+          <rect x="5" y="5" width="150" height="300" rx="28" fill="url(#bodyGrad-${c1.replace('#','')})" stroke="url(#edgeGrad)" stroke-width="2.5" />
+          <rect x="10" y="10" width="140" height="290" rx="24" fill="#030305" />
+          <rect x="55" y="18" width="50" height="12" rx="6" fill="#000000" stroke="#111" stroke-width="1" />
+          <circle cx="95" cy="24" r="3" fill="#08081a" />
+          <path d="M80 155 c-5-8 -2-18 6-22 4 8 2 18 -6 22 z M70 165 c3-5 8-5 11-2 4 4 10 3 14 -2 5 7 11 16 7 24 -3 5 -7 11 -12 11 -4 0 -7-3 -11-3 -4 0 -8 3 -12 3 -5 0 -9-6 -12-11 -4-8 1-21 15-20 z" fill="rgba(255,255,255,0.2)" />
+        </svg>
+      `;
+    }
+
+    // Catálogo
+    const IPHONES = [
+      {
+        id: "17pm", gen: "17", name: "iPhone 17 Pro Max", tag: "Novo Lançamento",
+        desc: "Chip A19 Pro, tela gigante de 6.9\" e teleobjetiva periscópica 5x de 48 MP.",
+        specs: ["A19 Pro", "6.9\" OLED", "48 MP Pro", "Titânio"],
+        colors: [
+          { name: "Titânio Dourado", c1: "#e8c87c", c2: "#9d7b2a", img: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-16-pro-finish-select-202409-6-9inch-deserttitanium?wid=480&hei=570&fmt=png-alpha" },
+          { name: "Titânio Natural", c1: "#4f5865", c2: "#242830", img: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-16-pro-finish-select-202409-6-9inch-naturaltitanium?wid=480&hei=570&fmt=png-alpha" },
+          { name: "Preto Espacial", c1: "#2a2a2e", c2: "#0f0f12", img: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-16-pro-finish-select-202409-6-9inch-blacktitanium?wid=480&hei=570&fmt=png-alpha" }
+        ]
+      },
+      {
+        id: "17p", gen: "17", name: "iPhone 17 Pro", tag: "Compacto Pro",
+        desc: "Titânio aeroespacial com Controle de Câmera tátil e tela 120Hz ProMotion.",
+        specs: ["A19 Pro", "6.3\" OLED", "120Hz", "USB 3.0"],
+        colors: [
+          { name: "Titânio Dourado", c1: "#e8c87c", c2: "#9d7b2a", img: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-16-pro-finish-select-202409-6-3inch-deserttitanium?wid=480&hei=570&fmt=png-alpha" },
+          { name: "Titânio Branco", c1: "#f2f2f5", c2: "#c8c8cf", img: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-16-pro-finish-select-202409-6-3inch-whitetitanium?wid=480&hei=570&fmt=png-alpha" },
+          { name: "Preto Espacial", c1: "#2a2a2e", c2: "#0f0f12", img: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-16-pro-finish-select-202409-6-3inch-blacktitanium?wid=480&hei=570&fmt=png-alpha" }
+        ]
+      },
+      {
+        id: "16pm", gen: "16", name: "iPhone 16 Pro Max", tag: "Mais Vendido",
+        desc: "Bateria para mais de 33 horas, Apple Intelligence e Titânio Grau 5.",
+        specs: ["A18 Pro", "6.9\" OLED", "Bateria Recorde", "4K 120fps"],
+        colors: [
+          { name: "Titânio Deserto", c1: "#c8ab8d", c2: "#7e664e", img: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-16-pro-finish-select-202409-6-9inch-deserttitanium?wid=480&hei=570&fmt=png-alpha" },
+          { name: "Titânio Natural", c1: "#57575f", c2: "#28282e", img: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-16-pro-finish-select-202409-6-9inch-naturaltitanium?wid=480&hei=570&fmt=png-alpha" },
+          { name: "Titânio Preto", c1: "#222225", c2: "#09090a", img: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-16-pro-finish-select-202409-6-9inch-blacktitanium?wid=480&hei=570&fmt=png-alpha" }
+        ]
+      },
+      {
+        id: "16", gen: "16", name: "iPhone 16", tag: "Cores Vivas",
+        desc: "Câmeras verticais para gravação de Vídeo Espacial e chip A18 ultra rápido.",
+        specs: ["A18", "Dynamic Island", "Vídeo Espacial", "Cor Infusa"],
+        colors: [
+          { name: "Ultramarino", c1: "#7f9bf0", c2: "#3952a1", img: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-16-finish-select-202409-6-1inch-ultramarine?wid=480&hei=570&fmt=png-alpha" },
+          { name: "Verde-Menta", c1: "#a7c4b5", c2: "#567c69", img: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-16-finish-select-202409-6-1inch-teal?wid=480&hei=570&fmt=png-alpha" },
+          { name: "Rosa Seda", c1: "#f2b8cc", c2: "#a65872", img: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-16-finish-select-202409-6-1inch-pink?wid=480&hei=570&fmt=png-alpha" },
+          { name: "Preto", c1: "#2a2a2d", c2: "#0c0c0e", img: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-16-finish-select-202409-6-1inch-black?wid=480&hei=570&fmt=png-alpha" }
+        ]
+      },
+      {
+        id: "15pm", gen: "15", name: "iPhone 15 Pro Max", tag: "Custo-Benefício Top",
+        desc: "O pioneiro em chassi de titânio, porta USB-C e zoom óptico periscópio de 5x.",
+        specs: ["A17 Pro", "6.7\" OLED", "USB-C", "Zoom 5x"],
+        colors: [
+          { name: "Titânio Natural", c1: "#57575f", c2: "#28282e", img: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-15-pro-finish-select-202309-6-7inch-naturaltitanium?wid=480&hei=570&fmt=png-alpha" },
+          { name: "Titânio Azul", c1: "#2d3847", c2: "#141c26", img: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-15-pro-finish-select-202309-6-7inch-bluetitanium?wid=480&hei=570&fmt=png-alpha" }
+        ]
+      },
+      {
+        id: "15", gen: "15", name: "iPhone 15", tag: "Campeão de Vendas",
+        desc: "Dynamic Island, vidro colorido por infusão fosco e sensor de 48 MP.",
+        specs: ["A16 Bionic", "48 MP", "USB-C", "Design Curvo"],
+        colors: [
+          { name: "Preto", c1: "#323336", c2: "#141517", img: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-15-finish-select-202309-6-1inch-black?wid=480&hei=570&fmt=png-alpha" },
+          { name: "Azul Claro", c1: "#c8d7e6", c2: "#7f9db8", img: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-15-finish-select-202309-6-1inch-blue?wid=480&hei=570&fmt=png-alpha" },
+          { name: "Rosa Pastel", c1: "#ebd1cf", c2: "#a88582", img: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-15-finish-select-202309-6-1inch-pink?wid=480&hei=570&fmt=png-alpha" }
+        ]
+      },
+      {
+        id: "14", gen: "14", name: "iPhone 14", tag: "Entrada Ideal",
+        desc: "Excelente autonomia de bateria, tela OLED Super Retina XDR e grande durabilidade.",
+        specs: ["A15 Bionic", "Modo Cinema", "Resistente à Água"],
+        colors: [
+          { name: "Meia-Noite", c1: "#1d232a", c2: "#0b0e12", img: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-14-finish-select-202209-6-1inch-midnight?wid=480&hei=570&fmt=png-alpha" },
+          { name: "Estelar", c1: "#ebe7e1", c2: "#b8b2a5", img: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-14-finish-select-202209-6-1inch-starlight?wid=480&hei=570&fmt=png-alpha" },
+          { name: "Azul", c1: "#9cb5ca", c2: "#567189", img: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-14-finish-select-202209-6-1inch-blue?wid=480&hei=570&fmt=png-alpha" }
+        ]
+      },
+      {
+        id: "13", gen: "14", name: "iPhone 13", tag: "Super Acessível",
+        desc: "O clássico consagrado: rápido, confiável e com o melhor preço de entrada.",
+        specs: ["A15 Bionic", "5G", "Câmera Dupla 12MP"],
+        colors: [
+          { name: "Meia-Noite", c1: "#1d232a", c2: "#0b0e12", img: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-13-finish-select-202207-6-1inch-midnight?wid=480&hei=570&fmt=png-alpha" },
+          { name: "Estelar", c1: "#ebe7e1", c2: "#b8b2a5", img: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-13-finish-select-202207-6-1inch-starlight?wid=480&hei=570&fmt=png-alpha" },
+          { name: "Rosa", c1: "#faddd7", c2: "#b8958f", img: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-13-finish-select-202207-6-1inch-pink?wid=480&hei=570&fmt=png-alpha" }
+        ]
+      }
+    ];
+
+    const grid = document.getElementById('device-grid');
+
+    function renderCatalog(filter) {
+      grid.innerHTML = "";
+      IPHONES.filter(item => filter === 'all' || item.gen === filter).forEach(phone => {
+        let sel = phone.colors[0];
+        let usingFallback = false;
+
+        const card = document.createElement('article');
+        card.className = 'device-card';
+        card.setAttribute('aria-labelledby', `title-${phone.id}`);
+
+        card.innerHTML = `
+          <div class="card-badge">${phone.tag}</div>
+          <div class="card-visual" id="visual-${phone.id}">
+            <img class="real-iphone-img" id="img-${phone.id}" src="${sel.img}" alt="${phone.name} na cor ${sel.name}" loading="lazy" />
+          </div>
+          <h3 class="card-title" id="title-${phone.id}">${phone.name}</h3>
+          <div class="card-desc">${phone.desc}</div>
+          <div class="card-specs" aria-label="Especificações">${phone.specs.map(s => `<span class="spec-tag">${s}</span>`).join('')}</div>
+          <div class="card-colors" id="colors-${phone.id}" role="radiogroup" aria-label="Cores disponíveis para ${phone.name}">
+            ${phone.colors.map((c, i) => `
+              <button class="card-color-dot ${i === 0 ? 'active' : ''}" 
+                      role="radio"
+                      aria-checked="${i === 0 ? 'true' : 'false'}"
+                      style="background: linear-gradient(135deg, ${c.c1}, ${c.c2});" 
+                      title="${c.name}"
+                      aria-label="Selecionar cor ${c.name}"
+                      data-index="${i}"></button>
+            `).join('')}
+          </div>
+          <div class="card-footer">
+            <a href="https://wa.me/5511976328585?text=Ol%C3%A1!%20Gostaria%20de%20consultar%20o%20valor%20do%20${encodeURIComponent(phone.name)}%20na%20cor%20${encodeURIComponent(sel.name)}." 
+               target="_blank" rel="noopener" 
+               class="btn-apple btn-wa" 
+               id="btn-buy-${phone.id}"
+               aria-label="Consultar valor de ${phone.name} no WhatsApp">
+              💬 Consultar Valor no WhatsApp
+            </a>
+          </div>
+        `;
+
+        const visualContainer = card.querySelector(`#visual-${phone.id}`);
+        const imgEl = card.querySelector(`#img-${phone.id}`);
+        const dots = card.querySelectorAll(`#colors-${phone.id} .card-color-dot`);
+        const buyBtn = card.querySelector(`#btn-buy-${phone.id}`);
+
+        imgEl.addEventListener('error', () => {
+          usingFallback = true;
+          visualContainer.innerHTML = generateFallbackSvg(sel.c1, sel.c2, `${phone.name} ${sel.name}`);
+        });
+
+        dots.forEach((dot, dIdx) => {
+          const updateColor = () => {
+            dots.forEach(d => {
+              d.classList.remove('active');
+              d.setAttribute('aria-checked', 'false');
+            });
+            dot.classList.add('active');
+            dot.setAttribute('aria-checked', 'true');
+
+            sel = phone.colors[parseInt(dot.dataset.index)];
+
+            if (usingFallback) {
+              visualContainer.innerHTML = generateFallbackSvg(sel.c1, sel.c2, `${phone.name} ${sel.name}`);
+            } else {
+              imgEl.style.opacity = '0.3';
+              setTimeout(() => {
+                imgEl.src = sel.img;
+                imgEl.alt = `${phone.name} na cor ${sel.name}`;
+                imgEl.style.opacity = '1';
+              }, 120);
+            }
+
+            buyBtn.href = `https://wa.me/5511976328585?text=Ol%C3%A1!%20Gostaria%20de%20consultar%20o%20valor%20do%20${encodeURIComponent(phone.name)}%20na%20cor%20${encodeURIComponent(sel.name)}.`;
+            buyBtn.setAttribute('aria-label', `Consultar valor de ${phone.name} na cor ${sel.name} no WhatsApp`);
+          };
+
+          dot.addEventListener('click', updateColor);
+          dot.addEventListener('keydown', e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              updateColor();
+            } else if (e.key === 'ArrowRight') {
+              e.preventDefault();
+              const next = dots[(dIdx + 1) % dots.length];
+              next.focus(); next.click();
+            } else if (e.key === 'ArrowLeft') {
+              e.preventDefault();
+              const prev = dots[(dIdx - 1 + dots.length) % dots.length];
+              prev.focus(); prev.click();
+            }
+          });
+        });
+
+        grid.appendChild(card);
+      });
+    }
+
+    const tabBtns = document.querySelectorAll('#filter-tabs .tab-btn');
+    tabBtns.forEach((btn, idx) => {
+      const selectTab = () => {
+        tabBtns.forEach(b => {
+          b.classList.remove('active');
+          b.setAttribute('aria-selected', 'false');
+        });
+        btn.classList.add('active');
+        btn.setAttribute('aria-selected', 'true');
+        renderCatalog(btn.dataset.filter);
+      };
+
+      btn.addEventListener('click', selectTab);
+      btn.addEventListener('keydown', e => {
+        if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          const next = tabBtns[(idx + 1) % tabBtns.length];
+          next.focus(); next.click();
+        } else if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          const prev = tabBtns[(idx - 1 + tabBtns.length) % tabBtns.length];
+          prev.focus(); prev.click();
+        }
+      });
+    });
+
+    function enviarSimulacao() {
+      const p = document.getElementById('tradein-phone').value;
+      const c = document.getElementById('tradein-condition').value;
+      window.open(`https://wa.me/5511976328585?text=Ol%C3%A1%20PL%20Cel!%20Gostaria%20de%20simular%20a%20troca%20do%20meu%20aparelho.%20Modelo:%20${encodeURIComponent(p)},%20Condi%C3%A7%C3%A3o:%20${encodeURIComponent(c)}.`, '_blank');
+    }
+
+    renderCatalog('all');
+  </script>
+</body>
+</html>
+```
